@@ -1,0 +1,259 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  COMPANY_OWNER
+  ACCOUNTANT
+  STAFF
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  DUE
+  OVERDUE
+  PARTIALLY_PAID
+  PAID
+  CANCELLED
+}
+
+enum ReminderChannel {
+  WHATSAPP
+  EMAIL
+  VOICE
+}
+
+enum ReminderStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  FAILED
+}
+
+enum PaymentMethod {
+  UPI
+  RAZORPAY
+  BANK_TRANSFER
+  CASH
+  OTHER
+}
+
+enum SubscriptionPlan {
+  STARTER
+  GROWTH
+  BUSINESS
+}
+
+enum AutomationTrigger {
+  BEFORE_DUE
+  ON_DUE
+  AFTER_DUE
+}
+
+enum IntegrationProvider {
+  RAZORPAY
+  WHATSAPP
+  EMAIL
+  VOICE
+}
+
+model Company {
+  id String @id @default(cuid())
+  companyName String
+  phone String
+  email String @unique
+  address String?
+  subscriptionPlan SubscriptionPlan @default(STARTER)
+  isSuspended Boolean @default(false)
+  timezone String @default("Asia/Kolkata")
+  users User[]
+  customers Customer[]
+  invoices Invoice[]
+  subscriptions Subscription[]
+  automationRules AutomationRule[]
+  integrations IntegrationConnection[]
+  auditLogs AuditLog[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model User {
+  id String @id @default(cuid())
+  name String
+  email String @unique
+  password String?
+  role Role @default(STAFF)
+  companyId String?
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+  auditLogs AuditLog[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Customer {
+  id String @id @default(cuid())
+  companyId String
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customerName String
+  mobile String
+  email String?
+  gstNumber String?
+  address String?
+  invoices Invoice[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([companyId, customerName])
+  @@index([companyId, mobile])
+}
+
+model Invoice {
+  id String @id @default(cuid())
+  companyId String
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customerId String
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  invoiceNumber String
+  invoiceAmount Decimal @db.Decimal(12,2)
+  amountPaid Decimal @default(0) @db.Decimal(12,2)
+  dueAmount Decimal @db.Decimal(12,2)
+  issueDate DateTime
+  dueDate DateTime
+  status InvoiceStatus @default(DRAFT)
+  notes String?
+  paymentHistory PaymentHistory[]
+  reminders ReminderLog[]
+  paymentLinks PaymentLink[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([companyId, invoiceNumber])
+  @@index([companyId, status, dueDate])
+  @@index([companyId, customerId])
+}
+
+model PaymentHistory {
+  id String @id @default(cuid())
+  invoiceId String
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount Decimal @db.Decimal(12,2)
+  paymentDate DateTime @default(now())
+  paymentMethod PaymentMethod
+  reference String?
+  providerPaymentId String? @unique
+  notes String?
+  createdAt DateTime @default(now())
+}
+
+model PaymentLink {
+  id String @id @default(cuid())
+  invoiceId String
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  provider IntegrationProvider @default(RAZORPAY)
+  referenceId String @unique
+  providerLinkId String?
+  shortUrl String?
+  amount Decimal @db.Decimal(12,2)
+  status String @default("CREATED")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([invoiceId, status])
+}
+
+model ReminderLog {
+  id String @id @default(cuid())
+  invoiceId String
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  automationRuleId String?
+  automationRule AutomationRule? @relation(fields: [automationRuleId], references: [id], onDelete: SetNull)
+  channel ReminderChannel
+  status ReminderStatus @default(QUEUED)
+  sentAt DateTime?
+  deliveredAt DateTime?
+  providerId String?
+  recipient String?
+  error String?
+  createdAt DateTime @default(now())
+  @@index([invoiceId, channel, createdAt])
+}
+
+model AutomationRule {
+  id String @id @default(cuid())
+  companyId String
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name String
+  trigger AutomationTrigger
+  offsetDays Int @default(0)
+  channel ReminderChannel
+  enabled Boolean @default(true)
+  maxAttempts Int @default(1)
+  template String?
+  reminders ReminderLog[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([companyId, enabled, trigger])
+}
+
+model IntegrationConnection {
+  id String @id @default(cuid())
+  companyId String
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  provider IntegrationProvider
+  displayName String?
+  externalAccountId String?
+  phoneNumberId String?
+  status String @default("DISCONNECTED")
+  metadata Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@unique([companyId, provider])
+}
+
+model Subscription {
+  id String @id @default(cuid())
+  companyId String
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  plan SubscriptionPlan
+  amount Decimal @db.Decimal(10,2)
+  expiryDate DateTime
+  status String @default("ACTIVE")
+  createdAt DateTime @default(now())
+}
+
+model RefreshToken {
+  id String @id @default(cuid())
+  tokenHash String @unique
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id String @id @default(cuid())
+  companyId String
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId String?
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action String
+  entity String
+  entityId String?
+  metadata Json?
+  createdAt DateTime @default(now())
+  @@index([companyId, createdAt])
+}
+
+model WebhookEvent {
+  id String @id @default(cuid())
+  provider IntegrationProvider
+  eventId String @unique
+  eventType String
+  payload Json
+  processedAt DateTime @default(now())
+}
